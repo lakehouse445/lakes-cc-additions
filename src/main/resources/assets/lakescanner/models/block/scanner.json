@@ -1,0 +1,8 @@
+{
+  "parent": "minecraft:block/orientable",
+  "textures": {
+    "front": "lakescanner:block/scanner_front",
+    "side": "lakescanner:block/scanner_side",
+    "top": "lakescanner:block/scanner_top"
+  }
+}

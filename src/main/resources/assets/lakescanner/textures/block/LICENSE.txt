@@ -1,0 +1,5 @@
+scanner_top.png, scanner_side.png, scanner_front.png are derived from
+ComputerCraft printer textures, (c) 2011 Daniel Ratcliffe, used and modified
+under the ComputerCraft Public License (recoloured to the advanced palette).
+This mod is distributed non-commercially with source available at no cost.
+pocket_multitool.png (in ../item/) is an original work.

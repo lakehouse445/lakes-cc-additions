@@ -1,0 +1,25 @@
+# Gradle
+.gradle/
+build/
+out/
+
+# Forge dev runs
+run/
+runs/
+logs/
+
+# Local dependency jars (see BUILDING.md for fetching Exposure)
+libs/*.jar
+
+# IDEs
+.idea/
+*.iml
+.vscode/
+eclipse/
+.classpath
+.project
+.settings/
+
+# OS noise
+Thumbs.db
+.DS_Store

@@ -1,0 +1,8 @@
+{
+  "parent": "minecraft:item/generated",
+  "textures": { "layer0": "lakescanner:item/folder" },
+  "overrides": [
+    { "predicate": { "lakescanner:filled": 1.0 },
+      "model": "lakescanner:item/folder_full" }
+  ]
+}

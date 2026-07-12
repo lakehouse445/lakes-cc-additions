@@ -1,0 +1,21 @@
+{
+  "block.lakescanner.scanner": "Scanner",
+  "item.lakescanner.scanner.tooltip": "Scans documents, maps, photos, containers... and hands",
+  "item.lakescanner.scanner.tooltip2": "Sneak + empty hand: biometric scan",
+  "item.lakescanner.pocket_multitool": "Pocket Multitool",
+  "item.lakescanner.pocket_multitool.tooltip": "Ender modem + speaker in one pocket upgrade",
+  "upgrade.lakescanner.multitool.adjective": "Deluxe",
+  "itemGroup.lakescanner": "Lake's CC Additions",
+  "item.lakescanner.folder": "Document Folder",
+  "item.lakescanner.folder.tooltip": "Holds 27 stacks of printouts and paper (16 per slot)",
+  "item.lakescanner.folder.empty": "Empty",
+  "item.lakescanner.pen": "Pen",
+  "item.lakescanner.pen.tooltip": "Hold a printed page in your other hand to draw on it",
+  "item.lakescanner.pen.needs_page": "Hold a printed page in your other hand",
+  "item.lakescanner.stamp": "Stamp",
+  "item.lakescanner.stamp.tooltip": "Use alone to design the emblem; use with a page to stamp it",
+  "item.lakescanner.stamp.blank": "This stamp has no emblem yet -- use it with empty hands to design one",
+  "item.lakescanner.stamp.blank_hint": "Blank",
+  "item.lakescanner.stamp.engraved": "Engraved",
+  "item.lakescanner.stamp.hint": "Click to stamp -- shift-click to stamp repeatedly"
+}

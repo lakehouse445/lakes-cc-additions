@@ -1,0 +1,8 @@
+{
+  "variants": {
+    "facing=north": { "model": "lakescanner:block/scanner" },
+    "facing=east":  { "model": "lakescanner:block/scanner", "y": 90 },
+    "facing=south": { "model": "lakescanner:block/scanner", "y": 180 },
+    "facing=west":  { "model": "lakescanner:block/scanner", "y": 270 }
+  }
+}

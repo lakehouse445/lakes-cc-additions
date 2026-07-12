@@ -1,0 +1,8 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "ingredients": [
+    { "item": "computercraft:wireless_modem_advanced" },
+    { "item": "computercraft:speaker" }
+  ],
+  "result": { "item": "lakescanner:pocket_multitool" }
+}
