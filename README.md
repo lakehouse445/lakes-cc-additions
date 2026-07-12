@@ -42,7 +42,7 @@ The jar is produced in `build/libs/`.
 ## Repository layout
 
 - `src/` — the mod
-- `lua/` — companion ComputerCraft programs, not shipped in the jar
+
 
 ## License
 
