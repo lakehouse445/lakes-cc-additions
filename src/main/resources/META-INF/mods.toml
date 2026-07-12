@@ -8,11 +8,7 @@ modId = "lakescanner"
 version = "1.4.3"
 displayName = "Lake's CC Additions"
 description = '''
-The Scanner: digitize printouts (and recreate them), read maps and photos,
-inspect containers, fingerprint documents, scan hands. Greyscale photo
-printing with a full darkroom, fax machines, invisible document seals,
-biometric identity. Plus the Pocket Multitool: ender modem + speaker in
-one pocket upgrade.
+CC:Tweaked Hardware and Tools for Paperwork.
 '''
 authors = "lakehouse"
 
