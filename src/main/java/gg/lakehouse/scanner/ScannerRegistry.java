@@ -15,6 +15,8 @@ import org.jetbrains.annotations.Nullable;
 import java.util.List;
 import net.minecraft.world.item.CreativeModeTab;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.item.crafting.RecipeSerializer;
+import net.minecraft.world.item.crafting.SimpleCraftingRecipeSerializer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.SoundType;
@@ -88,6 +90,14 @@ public final class ScannerRegistry {
     public static final RegistryObject<Item> PEN = ITEMS.register("pen",
         () -> new PenItem(new Item.Properties()));
 
+    public static final net.minecraftforge.registries.DeferredRegister<RecipeSerializer<?>> RECIPE_SERIALIZERS =
+        net.minecraftforge.registries.DeferredRegister.create(
+            net.minecraftforge.registries.ForgeRegistries.RECIPE_SERIALIZERS, MOD_ID);
+
+    public static final RegistryObject<RecipeSerializer<StampCopyRecipe>> STAMP_COPY =
+        RECIPE_SERIALIZERS.register("stamp_copy",
+            () -> new SimpleCraftingRecipeSerializer<>(StampCopyRecipe::new));
+
     public static final RegistryObject<Item> STAMP = ITEMS.register("stamp",
         () -> new StampItem(new Item.Properties()));
 
@@ -123,6 +133,7 @@ public final class ScannerRegistry {
     }
 
     public static void register(IEventBus modBus) {
+        RECIPE_SERIALIZERS.register(modBus);
         BLOCKS.register(modBus);
         ITEMS.register(modBus);
         BLOCK_ENTITIES.register(modBus);

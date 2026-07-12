@@ -247,6 +247,42 @@ public class ScannerPeripheral implements IPeripheral {
         return out;
     }
 
+    /** Remove N plain paper from a folder's contents, or error without changing it. */
+    private static void consumeFolderPaper(ItemStack folder, int needed) throws LuaException {
+        CompoundTag tag = folder.getOrCreateTag();
+        ListTag items = tag.getList("Items", Tag.TAG_COMPOUND);
+
+        int available = 0;
+        for (int i = 0; i < items.size(); i++) {
+            ItemStack s = ItemStack.of(items.getCompound(i));
+            if (s.is(net.minecraft.world.item.Items.PAPER)) available += s.getCount();
+        }
+        if (available < needed) {
+            throw new LuaException("Not enough paper in the folder (need " + needed
+                + ", found " + available + ")");
+        }
+
+        ListTag out = new ListTag();
+        int remaining = needed;
+        for (int i = 0; i < items.size(); i++) {
+            CompoundTag entry = items.getCompound(i);
+            ItemStack s = ItemStack.of(entry);
+            if (remaining > 0 && s.is(net.minecraft.world.item.Items.PAPER)) {
+                int take = Math.min(remaining, s.getCount());
+                s.shrink(take);
+                remaining -= take;
+                if (s.isEmpty()) continue;
+                CompoundTag e = new CompoundTag();
+                e.putByte("Slot", entry.getByte("Slot"));
+                s.save(e);
+                out.add(e);
+            } else {
+                out.add(entry);
+            }
+        }
+        tag.put("Items", out);
+    }
+
     /** File a document into the first free slot of a folder's NBT. */
     private static void insertIntoFolder(ItemStack folder, ItemStack doc) throws LuaException {
         CompoundTag tag = folder.getOrCreateTag();
@@ -261,6 +297,75 @@ public class ScannerPeripheral implements IPeripheral {
         doc.save(entry);
         items.add(entry);
         tag.put("Items", items);
+    }
+
+    /**
+     * Count drawn ink pixels inside a rectangle of a printout's drawing
+     * layer. Coordinates are 0-based page pixels (the text area starts at
+     * 13, 11; a character cell is 6x9). Returns { total, dark, red, blue }.
+     * Optional page (default 1) and folder slot to reach into a folder.
+     */
+    @LuaFunction(mainThread = true)
+    public final Map<String, Object> countInk(int x, int y, int w, int h,
+                                              Optional<Integer> page,
+                                              Optional<Integer> folderSlot) throws LuaException {
+        ItemStack stack = resolveDocument(folderSlot);
+        if (!stack.hasTag()) return inkResult(0, 0, 0);
+        int pageIndex = page.orElse(1) - 1;
+        byte[] layer = DrawingData.get(stack, pageIndex);
+        if (layer == null) return inkResult(0, 0, 0);
+
+        int dark = 0, red = 0, blue = 0;
+        int x1 = Math.max(0, x), y1 = Math.max(0, y);
+        int x2 = Math.min(DrawingData.WIDTH, x + w), y2 = Math.min(DrawingData.HEIGHT, y + h);
+        for (int py = y1; py < y2; py++) {
+            for (int px = x1; px < x2; px++) {
+                switch (DrawingData.getPixel(layer, px, py)) {
+                    case 1 -> dark++;
+                    case 2 -> red++;
+                    case 3 -> blue++;
+                }
+            }
+        }
+        return inkResult(dark, red, blue);
+    }
+
+    private static Map<String, Object> inkResult(int dark, int red, int blue) {
+        Map<String, Object> out = new HashMap<>();
+        out.put("total", dark + red + blue);
+        out.put("dark", dark);
+        out.put("red", red);
+        out.put("blue", blue);
+        return out;
+    }
+
+    /**
+     * Read the emblem off a stamp in the scanner: { size, rows } with rows
+     * as strings of 0-3, same encoding as drawing data. Lets a computer
+     * verify a seal is THE seal, not just that ink exists.
+     */
+    @LuaFunction(mainThread = true)
+    public final Map<String, Object> scanStamp() throws LuaException {
+        ItemStack stack = requireItem();
+        if (!(stack.getItem() instanceof gg.lakehouse.scanner.StampItem)) {
+            throw new LuaException("Item is not a stamp");
+        }
+        byte[] emblem = gg.lakehouse.scanner.StampItem.getEmblem(stack);
+        if (emblem == null) throw new LuaException("Stamp has no emblem");
+
+        Map<Integer, String> rows = new HashMap<>();
+        StringBuilder row = new StringBuilder(gg.lakehouse.scanner.StampItem.SIZE);
+        for (int y = 0; y < gg.lakehouse.scanner.StampItem.SIZE; y++) {
+            row.setLength(0);
+            for (int x = 0; x < gg.lakehouse.scanner.StampItem.SIZE; x++) {
+                row.append((char) ('0' + gg.lakehouse.scanner.StampItem.pixel(emblem, x, y)));
+            }
+            rows.put(y + 1, row.toString());
+        }
+        Map<String, Object> out = new HashMap<>();
+        out.put("size", gg.lakehouse.scanner.StampItem.SIZE);
+        out.put("rows", rows);
+        return out;
     }
 
     // ------------------------------------------------------------------
@@ -361,7 +466,12 @@ public class ScannerPeripheral implements IPeripheral {
     @LuaFunction(mainThread = true)
     public final void createPrintout(Map<?, ?> pagesArg, Optional<String> title) throws LuaException {
         ItemStack existing = blockEntity.getScannedItem();
-        if (!existing.isEmpty() && !(existing.getItem() instanceof FolderItem)) {
+        if (!existing.isEmpty() && !(existing.getItem() instanceof FolderItem)
+            && !existing.is(net.minecraft.world.item.Items.PAPER)) {
+            throw new LuaException("Scanner slot must be empty (or hold a folder to file into)");
+        }
+        if (existing.is(net.minecraft.world.item.Items.PAPER)
+            && !gg.lakehouse.scanner.ScannerConfig.REQUIRE_PRINTOUT_MATERIALS.get()) {
             throw new LuaException("Scanner slot must be empty (or hold a folder to file into)");
         }
         List<Map<?, ?>> pages = new ArrayList<>();
@@ -408,9 +518,20 @@ public class ScannerPeripheral implements IPeripheral {
             }
         }
         ItemStack inSlot = blockEntity.getScannedItem();
+        boolean needPaper = gg.lakehouse.scanner.ScannerConfig.REQUIRE_PRINTOUT_MATERIALS.get();
+
         if (inSlot.getItem() instanceof FolderItem) {
+            if (needPaper) consumeFolderPaper(inSlot, pages.size());
             insertIntoFolder(inSlot, stack);
             blockEntity.setScannedItem(inSlot); // re-set to fire events + persist
+        } else if (needPaper) {
+            if (!inSlot.is(net.minecraft.world.item.Items.PAPER)
+                || inSlot.getCount() != pages.size()) {
+                throw new LuaException("Printing requires paper: a folder containing "
+                    + pages.size() + "+ paper, or an exact stack of "
+                    + pages.size() + " paper in the slot");
+            }
+            blockEntity.setScannedItem(stack);
         } else {
             blockEntity.setScannedItem(stack);
         }

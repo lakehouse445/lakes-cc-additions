@@ -14,69 +14,95 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.ItemStack;
 
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Deque;
+import java.util.List;
+
 import static dan200.computercraft.client.render.PrintoutRenderer.X_SIZE;
 import static dan200.computercraft.client.render.PrintoutRenderer.X_TEXT_MARGIN;
 import static dan200.computercraft.client.render.PrintoutRenderer.Y_SIZE;
 import static dan200.computercraft.client.render.PrintoutRenderer.Y_TEXT_MARGIN;
 
 /**
- * The pen editor: renders the real page (via CC:T's printout renderer) with
- * the ink layer above it. Left-drag draws, right-drag erases. Saved layers
- * are sent to the server per page on Done.
+ * The pen editor. The page sits in a fixed-size viewport; zoom (scroll,
+ * 1-4x, anchored on the cursor) and pan (middle-drag) happen inside it, so
+ * the layout never moves. Tools: draw (with lazy-brush stabilizer), line
+ * (also Shift while drawing), erase. Undo/redo per page.
  */
 public class DrawingScreen extends Screen {
     private static final int LINES = 21;
-    private static final String[] INK_NAMES = { "", "Dark", "Red", "Blue" };
+    private static final int PANEL = 0xF01A1A1E;
+    private static final int PANEL_EDGE = 0xFF3A3A44;
+    private static final int GOLD = 0xFFE3E087;
+    private static final int DIM = 0xFF8D8A63;
+    private static final int PAPER = 0xFFECEADE;
+
+    private static final int PAD = 12;
+    private static final int SIDEBAR_W = 72;
+    private static final int BTN_W = 34, BTN_H = 20, BTN_GAP = 4, ROW = 24;
+    private static final int VW = X_SIZE + 4, VH = Y_SIZE + 4; // viewport (2px inset)
+
+    private static final int TOOL_DRAW = 0, TOOL_LINE = 1, TOOL_ERASE = 2;
+    private static final double[] STAB_RADII = { 0, 2.5, 5.0 };
+    private static final String[] STAB_NAMES = { "Stab: Off", "Stab: Med", "Stab: Hi" };
 
     private final InteractionHand pageHand;
-    private final ItemStack stack;
     private final String[] text;
     private final String[] colours;
     private final int pageCount;
     private final boolean isBook;
-
     private final byte[][] layers;
     private final boolean[] dirty;
+    private final List<Deque<byte[]>> undoStacks = new ArrayList<>();
+    private final List<Deque<byte[]>> redoStacks = new ArrayList<>();
 
     private int page = 0;
-    private int ink = 1;       // 1 dark, 2 red, 3 blue
-    private int brush = 1;     // 1 or 2 px
-    private boolean erasing = false;
-    private int lastX = -1, lastY = -1;
-    private final java.util.List<java.util.Deque<byte[]>> undoStacks = new java.util.ArrayList<>();
-    private static final int UNDO_LIMIT = 24;
+    private int ink = 1;
+    private int tool = TOOL_DRAW;
+    private int brush = 1;
+    private int stab = 1;
 
-    private int left, top;
-    private Button inkButton, brushButton, eraseButton, prevButton, nextButton;
+    private int zoom = 1;
+    private double panX = 0, panY = 0;
+
+    private boolean stroking = false;
+    private boolean strokeErase = false;
+    private boolean strokeLine = false;
+    private double tipX, tipY;          // stabilized pen tip (canvas)
+    private int anchorX, anchorY;       // line anchor (canvas)
+    private int curX, curY;             // current canvas position
+    private int hoverX = -1, hoverY = -1;
+
+    private int panelX, panelY, vx, vy;
+    private Button drawBtn, lineBtn, eraseBtn, brushBtn, stabBtn, prevBtn, nextBtn;
 
     public DrawingScreen(InteractionHand pageHand) {
         super(Component.translatable("item.lakescanner.pen"));
         this.pageHand = pageHand;
-        this.stack = minecraftPlayerStack(pageHand);
-
+        ItemStack stack = stack();
         CompoundTag tag = stack.getTag();
         this.pageCount = tag != null && tag.contains("Pages") ? Math.max(1, tag.getInt("Pages")) : 1;
         this.isBook = stack.getDescriptionId().contains("printed_book");
-
         this.text = new String[pageCount * LINES];
         this.colours = new String[pageCount * LINES];
         for (int i = 0; i < pageCount * LINES; i++) {
             text[i] = pad(tag != null ? tag.getString("Text" + i) : "", ' ');
             colours[i] = pad(tag != null ? tag.getString("Color" + i) : "", 'f');
         }
-
         this.layers = new byte[pageCount][];
         this.dirty = new boolean[pageCount];
         for (int p = 0; p < pageCount; p++) {
             byte[] existing = DrawingData.get(stack, p);
             layers[p] = existing != null ? existing.clone() : new byte[DrawingData.BYTES];
-            undoStacks.add(new java.util.ArrayDeque<>());
+            undoStacks.add(new ArrayDeque<>());
+            redoStacks.add(new ArrayDeque<>());
         }
     }
 
-    private static ItemStack minecraftPlayerStack(InteractionHand hand) {
+    private ItemStack stack() {
         var player = net.minecraft.client.Minecraft.getInstance().player;
-        return player == null ? ItemStack.EMPTY : player.getItemInHand(hand);
+        return player == null ? ItemStack.EMPTY : player.getItemInHand(pageHand);
     }
 
     private static String pad(String s, char fill) {
@@ -86,94 +112,123 @@ public class DrawingScreen extends Screen {
         return sb.toString();
     }
 
+    // ---------------------------------------------------------------- layout
+
     @Override
     protected void init() {
-        left = (width - X_SIZE) / 2;
-        top = (height - Y_SIZE) / 2 - 8;
-        int by = top + Y_SIZE + (isBook ? 16 : 8);
-        int[] widths = { 58, 34, 46, 44, 44 };
-        int gap = 5;
-        int totalW = gap * (widths.length - 1);
-        for (int w : widths) totalW += w;
-        int bx = (width - totalW) / 2;
+        int groupW = VW + PAD + SIDEBAR_W;
+        panelX = (width - groupW) / 2;
+        panelY = Math.max(2, (height - (VH + 24)) / 2);
+        vx = panelX;
+        vy = panelY;
 
-        inkButton = addRenderableWidget(Button.builder(Component.literal("Ink: Dark"),
-            b -> { ink = ink % 3 + 1; erasing = false; refreshLabels(); })
-            .bounds(bx, by, widths[0], 20).build());
-        bx += widths[0] + gap;
-        brushButton = addRenderableWidget(Button.builder(Component.literal("1px"),
-            b -> { brush = brush == 1 ? 2 : 1; refreshLabels(); })
-            .bounds(bx, by, widths[1], 20).build());
-        bx += widths[1] + gap;
-        eraseButton = addRenderableWidget(Button.builder(Component.literal("Erase"),
-            b -> { erasing = !erasing; refreshLabels(); })
-            .bounds(bx, by, widths[2], 20).build());
-        bx += widths[2] + gap;
+        int sx = vx + VW + PAD;
+        int y = vy + 48; // below swatches
+
+        drawBtn = addRenderableWidget(Button.builder(Component.literal("Draw"),
+            b -> { tool = TOOL_DRAW; refresh(); }).bounds(sx, y, BTN_W, BTN_H).build());
+        lineBtn = addRenderableWidget(Button.builder(Component.literal("Line"),
+            b -> { tool = TOOL_LINE; refresh(); }).bounds(sx + BTN_W + BTN_GAP, y, BTN_W, BTN_H).build());
+        y += ROW;
+        eraseBtn = addRenderableWidget(Button.builder(Component.literal("Erase"),
+            b -> { tool = TOOL_ERASE; refresh(); }).bounds(sx, y, BTN_W, BTN_H).build());
+        brushBtn = addRenderableWidget(Button.builder(Component.literal("1px"),
+            b -> { brush = brush == 1 ? 2 : 1; refresh(); }).bounds(sx + BTN_W + BTN_GAP, y, BTN_W, BTN_H).build());
+        y += ROW;
+        stabBtn = addRenderableWidget(Button.builder(Component.literal(STAB_NAMES[stab]),
+            b -> { stab = (stab + 1) % 3; refresh(); }).bounds(sx, y, BTN_W * 2 + BTN_GAP, BTN_H).build());
+        y += ROW;
         addRenderableWidget(Button.builder(Component.literal("Undo"), b -> undo())
-            .bounds(bx, by, widths[3], 20).build());
-        bx += widths[3] + gap;
+            .bounds(sx, y, BTN_W, BTN_H).build());
+        addRenderableWidget(Button.builder(Component.literal("Redo"), b -> redo())
+            .bounds(sx + BTN_W + BTN_GAP, y, BTN_W, BTN_H).build());
+        y += ROW;
         addRenderableWidget(Button.builder(Component.literal("Done"), b -> onClose())
-            .bounds(bx, by, widths[4], 20).build());
+            .bounds(sx, vy + VH - BTN_H, BTN_W * 2 + BTN_GAP, BTN_H).build());
 
         if (pageCount > 1) {
-            prevButton = addRenderableWidget(Button.builder(Component.literal("<"),
-                b -> { if (page > 0) page--; refreshLabels(); })
-                .bounds(left - 24, top + Y_SIZE / 2 - 10, 20, 20).build());
-            nextButton = addRenderableWidget(Button.builder(Component.literal(">"),
-                b -> { if (page < pageCount - 1) page++; refreshLabels(); })
-                .bounds(left + X_SIZE + 4, top + Y_SIZE / 2 - 10, 20, 20).build());
+            prevBtn = addRenderableWidget(Button.builder(Component.literal("<"),
+                b -> { if (page > 0) page--; refresh(); })
+                .bounds(vx, vy + VH + 2, 20, 20).build());
+            nextBtn = addRenderableWidget(Button.builder(Component.literal(">"),
+                b -> { if (page < pageCount - 1) page++; refresh(); })
+                .bounds(vx + VW - 20, vy + VH + 2, 20, 20).build());
         }
-        refreshLabels();
+        refresh();
     }
 
-    private void refreshLabels() {
-        inkButton.setMessage(Component.literal("Ink: " + INK_NAMES[ink]));
-        brushButton.setMessage(Component.literal(brush + "px"));
-        eraseButton.setMessage(Component.literal(erasing ? "Drawing?" : "Erase"));
-        if (prevButton != null) {
-            prevButton.active = page > 0;
-            nextButton.active = page < pageCount - 1;
+    private void refresh() {
+        drawBtn.active = tool != TOOL_DRAW;
+        lineBtn.active = tool != TOOL_LINE;
+        eraseBtn.active = tool != TOOL_ERASE;
+        brushBtn.setMessage(Component.literal(brush + "px"));
+        stabBtn.setMessage(Component.literal(STAB_NAMES[stab]));
+        if (prevBtn != null) {
+            prevBtn.active = page > 0;
+            nextBtn.active = page < pageCount - 1;
         }
     }
 
     // ---------------------------------------------------------------- render
 
     @Override
-    public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
-        // Background goes behind the page (CC:T does the same in PrintoutScreen)
-        graphics.pose().pushPose();
-        graphics.pose().translate(0, 0, -1);
-        renderBackground(graphics);
-        graphics.pose().popPose();
+    public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
+        g.pose().pushPose();
+        g.pose().translate(0, 0, -1);
+        renderBackground(g);
+        g.pose().popPose();
+
+        // page content (scissored, zoomed, panned) -- no chrome, just the paper
+        g.enableScissor(vx, vy, vx + VW, vy + VH);
+        g.pose().pushPose();
+        g.pose().translate(vx + 2 - panX * zoom, vy + 2 - panY * zoom, 0);
+        g.pose().scale(zoom, zoom, 1);
 
         var buffers = net.minecraft.client.renderer.MultiBufferSource.immediate(
             com.mojang.blaze3d.vertex.Tesselator.getInstance().getBuilder());
-        PrintoutRenderer.drawBorder(graphics.pose(), buffers, left, top, 0, page, pageCount, isBook,
+        PrintoutRenderer.drawBorder(g.pose(), buffers, 0, 0, 0, page, pageCount, isBook,
             LightTexture.FULL_BRIGHT);
-        PrintoutRenderer.drawText(graphics.pose(), buffers, left + X_TEXT_MARGIN, top + Y_TEXT_MARGIN,
+        PrintoutRenderer.drawText(g.pose(), buffers, X_TEXT_MARGIN, Y_TEXT_MARGIN,
             page * LINES, LightTexture.FULL_BRIGHT, text, colours);
         buffers.endBatch();
 
-        drawInk(graphics, layers[page], left, top);
-
-        if (pageCount > 1) {
-            graphics.drawCenteredString(font, (page + 1) + " / " + pageCount,
-                left + X_SIZE / 2, top - 12, 0xFFFFFF);
+        drawLayer(g, layers[page]);
+        if (stroking && strokeLine) {
+            ShapeUtil.line(anchorX, anchorY, curX, curY, (x, y2) ->
+                stampPreview(g, x, y2));
         }
-        super.render(graphics, mouseX, mouseY, partialTick);
+        g.pose().popPose();
+        g.disableScissor();
+
+        // coordinates + zoom, above the page where the eye already is
+        String status;
+        if (hoverX >= 0) {
+            int col = (hoverX - X_TEXT_MARGIN) / 6, row = (hoverY - Y_TEXT_MARGIN) / 9;
+            boolean inText = hoverX >= X_TEXT_MARGIN && hoverY >= Y_TEXT_MARGIN
+                && col >= 0 && col < 25 && row >= 0 && row < LINES;
+            status = inText
+                ? String.format("col %d, row %d  (px %d,%d)   %dx", col, row, hoverX, hoverY, zoom)
+                : String.format("margin  (px %d,%d)   %dx", hoverX, hoverY, zoom);
+        } else {
+            status = String.format("scroll: zoom   middle-drag: pan   %dx", zoom);
+        }
+        g.drawCenteredString(font, status, vx + VW / 2, vy - 12, DIM);
+        if (pageCount > 1) {
+            g.drawCenteredString(font, (page + 1) + " / " + pageCount,
+                vx + VW / 2, vy + VH + 8, 0xFFFFFFFF);
+        }
+
+        drawSwatches(g);
+        super.render(g, mouseX, mouseY, partialTick);
     }
 
-    /** Horizontal run-length rendering of the ink layer. */
-    private static void drawInk(GuiGraphics graphics, byte[] layer, int ox, int oy) {
+    private void drawLayer(GuiGraphics g, byte[] layer) {
         for (int y = 0; y < DrawingData.HEIGHT; y++) {
             int runStart = -1, runInk = 0;
             for (int x = 0; x <= DrawingData.WIDTH; x++) {
                 int v = x < DrawingData.WIDTH ? DrawingData.getPixel(layer, x, y) : 0;
                 if (v != runInk) {
-                    if (runInk != 0) {
-                        graphics.fill(ox + runStart, oy + y, ox + x, oy + y + 1,
-                            DrawingData.COLOURS[runInk]);
-                    }
+                    if (runInk != 0) g.fill(runStart, y, x, y + 1, DrawingData.COLOURS[runInk]);
                     runStart = x;
                     runInk = v;
                 }
@@ -181,35 +236,146 @@ public class DrawingScreen extends Screen {
         }
     }
 
+    private void stampPreview(GuiGraphics g, int x, int y) {
+        for (int dy = 0; dy < brush; dy++) {
+            for (int dx = 0; dx < brush; dx++) {
+                g.fill(x + dx, y + dy, x + dx + 1, y + dy + 1,
+                    (DrawingData.COLOURS[ink] & 0x00FFFFFF) | 0xA0000000);
+            }
+        }
+    }
+
+    private void drawSwatches(GuiGraphics g) {
+        int sx = vx + VW + PAD;
+        for (int i = 0; i < 4; i++) {
+            int cx = sx + (i % 2) * 20;
+            int cy = vy + (i / 2) * 20;
+            boolean sel = i == 0 ? tool == TOOL_ERASE : (ink == i && tool != TOOL_ERASE);
+            g.fill(cx - 2, cy - 2, cx + 16, cy + 16, sel ? GOLD : PANEL_EDGE);
+            g.fill(cx, cy, cx + 14, cy + 14, PAPER);
+            if (i != 0) g.fill(cx + 4, cy + 4, cx + 10, cy + 10, DrawingData.COLOURS[i]);
+        }
+    }
+
     // ---------------------------------------------------------------- input
 
-    private void paint(double mouseX, double mouseY, boolean erase) {
-        int cx = (int) Math.floor(mouseX) - left;
-        int cy = (int) Math.floor(mouseY) - top;
-        if (cx < 0 || cx >= DrawingData.WIDTH || cy < 0 || cy >= DrawingData.HEIGHT) {
-            lastX = -1;
-            return;
-        }
-        int value = erase ? 0 : ink;
+    private double canvasX(double mx) { return (mx - (vx + 2)) / zoom + panX; }
+    private double canvasY(double my) { return (my - (vy + 2)) / zoom + panY; }
+    private boolean inViewport(double mx, double my) {
+        return mx >= vx && mx < vx + VW && my >= vy && my < vy + VH;
+    }
 
-        if (lastX >= 0) {
-            // Bresenham from the previous sample so fast strokes stay connected
-            int x0 = lastX, y0 = lastY, x1 = cx, y1 = cy;
-            int dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0);
-            int sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1, err = dx + dy;
-            while (true) {
-                stamp(x0, y0, value);
-                if (x0 == x1 && y0 == y1) break;
-                int e2 = 2 * err;
-                if (e2 >= dy) { err += dy; x0 += sx; }
-                if (e2 <= dx) { err += dx; y0 += sy; }
-            }
+    @Override
+    public void mouseMoved(double mx, double my) {
+        if (inViewport(mx, my)) {
+            hoverX = (int) Math.floor(canvasX(mx));
+            hoverY = (int) Math.floor(canvasY(my));
+            if (hoverX < 0 || hoverX >= DrawingData.WIDTH
+                || hoverY < 0 || hoverY >= DrawingData.HEIGHT) hoverX = hoverY = -1;
         } else {
-            stamp(cx, cy, value);
+            hoverX = hoverY = -1;
         }
-        lastX = cx;
-        lastY = cy;
-        dirty[page] = true;
+    }
+
+    private boolean swatchClick(double mx, double my) {
+        int sx = vx + VW + PAD;
+        for (int i = 0; i < 4; i++) {
+            int cx = sx + (i % 2) * 20;
+            int cy = vy + (i / 2) * 20;
+            if (mx >= cx - 2 && mx <= cx + 16 && my >= cy - 2 && my <= cy + 16) {
+                if (i == 0) tool = TOOL_ERASE;
+                else { ink = i; if (tool == TOOL_ERASE) tool = TOOL_DRAW; }
+                refresh();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    @Override
+    public boolean mouseClicked(double mx, double my, int button) {
+        if (super.mouseClicked(mx, my, button)) return true;
+        if (swatchClick(mx, my)) return true;
+        if (!inViewport(mx, my)) return false;
+        if (button == 2) return true; // pan handled in drag
+
+        if (button == 0 || button == 1) {
+            int cx = clampX(canvasX(mx)), cy = clampY(canvasY(my));
+            pushUndo();
+            stroking = true;
+            strokeErase = tool == TOOL_ERASE || button == 1;
+            strokeLine = !strokeErase && (tool == TOOL_LINE || hasShiftDown());
+            tipX = cx; tipY = cy;
+            anchorX = cx; anchorY = cy;
+            curX = cx; curY = cy;
+            if (!strokeLine) stamp(cx, cy, strokeErase ? 0 : ink);
+            return true;
+        }
+        return false;
+    }
+
+    @Override
+    public boolean mouseDragged(double mx, double my, int button, double dragX, double dragY) {
+        if (button == 2) {
+            panX = clampPanX(panX - dragX / zoom);
+            panY = clampPanY(panY - dragY / zoom);
+            return true;
+        }
+        if (!stroking || (button != 0 && button != 1)) {
+            return super.mouseDragged(mx, my, button, dragX, dragY);
+        }
+        double txd = canvasX(mx), tyd = canvasY(my);
+        curX = clampX(txd); curY = clampY(tyd);
+
+        if (strokeLine) return true; // preview only; committed on release
+
+        // lazy-brush stabilizer
+        double r = STAB_RADII[stab];
+        double dx = txd - tipX, dy = tyd - tipY;
+        double d = Math.sqrt(dx * dx + dy * dy);
+        if (d > r && d > 0) {
+            double nx = tipX + dx / d * (d - r), ny = tipY + dy / d * (d - r);
+            int value = strokeErase ? 0 : ink;
+            ShapeUtil.line((int) Math.floor(tipX), (int) Math.floor(tipY),
+                (int) Math.floor(nx), (int) Math.floor(ny), (x, y) -> stamp(x, y, value));
+            tipX = nx; tipY = ny;
+        }
+        return true;
+    }
+
+    @Override
+    public boolean mouseReleased(double mx, double my, int button) {
+        if (stroking && (button == 0 || button == 1)) {
+            if (strokeLine) {
+                int value = strokeErase ? 0 : ink;
+                ShapeUtil.line(anchorX, anchorY, curX, curY, (x, y) -> stamp(x, y, value));
+            }
+            stroking = false;
+        }
+        return super.mouseReleased(mx, my, button);
+    }
+
+    @Override
+    public boolean mouseScrolled(double mx, double my, double delta) {
+        if (!inViewport(mx, my)) return super.mouseScrolled(mx, my, delta);
+        int newZoom = Math.max(1, Math.min(4, zoom + (delta > 0 ? 1 : -1)));
+        if (newZoom != zoom) {
+            panX = clampPanXFor(panX + (mx - (vx + 2)) * (1.0 / zoom - 1.0 / newZoom), newZoom);
+            panY = clampPanYFor(panY + (my - (vy + 2)) * (1.0 / zoom - 1.0 / newZoom), newZoom);
+            zoom = newZoom;
+        }
+        return true;
+    }
+
+    private int clampX(double v) { return Math.max(0, Math.min(DrawingData.WIDTH - 1, (int) Math.floor(v))); }
+    private int clampY(double v) { return Math.max(0, Math.min(DrawingData.HEIGHT - 1, (int) Math.floor(v))); }
+    private double clampPanX(double v) { return clampPanXFor(v, zoom); }
+    private double clampPanY(double v) { return clampPanYFor(v, zoom); }
+    private double clampPanXFor(double v, int z) {
+        return Math.max(0, Math.min(Math.max(0, DrawingData.WIDTH - (VW - 4.0) / z), v));
+    }
+    private double clampPanYFor(double v, int z) {
+        return Math.max(0, Math.min(Math.max(0, DrawingData.HEIGHT - (VH - 4.0) / z), v));
     }
 
     private void stamp(int x, int y, int value) {
@@ -218,59 +384,41 @@ public class DrawingScreen extends Screen {
                 DrawingData.setPixel(layers[page], x + dx, y + dy, value);
             }
         }
+        dirty[page] = true;
     }
 
-    @Override
-    public boolean mouseClicked(double mouseX, double mouseY, int button) {
-        if (super.mouseClicked(mouseX, mouseY, button)) return true;
-        if (button == 0 || button == 1) {
-            pushUndo();
-            lastX = -1;
-            paint(mouseX, mouseY, erasing || button == 1);
-            return true;
-        }
-        return false;
-    }
-
-    @Override
-    public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
-        if (button == 0 || button == 1) {
-            paint(mouseX, mouseY, erasing || button == 1);
-            return true;
-        }
-        return super.mouseDragged(mouseX, mouseY, button, dragX, dragY);
-    }
-
-    @Override
-    public boolean mouseReleased(double mouseX, double mouseY, int button) {
-        lastX = -1;
-        return super.mouseReleased(mouseX, mouseY, button);
-    }
+    // ---------------------------------------------------------------- history
 
     private void pushUndo() {
-        var stack = undoStacks.get(page);
-        stack.push(layers[page].clone());
-        while (stack.size() > UNDO_LIMIT) stack.removeLast();
+        undoStacks.get(page).push(layers[page].clone());
+        while (undoStacks.get(page).size() > 24) undoStacks.get(page).removeLast();
+        redoStacks.get(page).clear();
     }
 
     private void undo() {
-        var stack = undoStacks.get(page);
-        if (!stack.isEmpty()) {
-            layers[page] = stack.pop();
+        var u = undoStacks.get(page);
+        if (!u.isEmpty()) {
+            redoStacks.get(page).push(layers[page].clone());
+            layers[page] = u.pop();
+            dirty[page] = true;
+        }
+    }
+
+    private void redo() {
+        var r = redoStacks.get(page);
+        if (!r.isEmpty()) {
+            undoStacks.get(page).push(layers[page].clone());
+            layers[page] = r.pop();
             dirty[page] = true;
         }
     }
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
-        if (keyCode == InputConstants.KEY_Z && (modifiers & 2) != 0) { // Ctrl+Z
-            undo();
-            return true;
-        }
-        if (keyCode == InputConstants.KEY_E) {
-            onClose();
-            return true;
-        }
+        boolean ctrl = (modifiers & 2) != 0;
+        if (ctrl && keyCode == InputConstants.KEY_Z) { undo(); return true; }
+        if (ctrl && keyCode == InputConstants.KEY_Y) { redo(); return true; }
+        if (keyCode == InputConstants.KEY_E) { onClose(); return true; }
         return super.keyPressed(keyCode, scanCode, modifiers);
     }
 
@@ -288,7 +436,5 @@ public class DrawingScreen extends Screen {
     }
 
     @Override
-    public boolean isPauseScreen() {
-        return false;
-    }
+    public boolean isPauseScreen() { return false; }
 }

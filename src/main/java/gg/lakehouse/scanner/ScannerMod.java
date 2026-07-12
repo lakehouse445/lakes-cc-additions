@@ -30,6 +30,8 @@ public class ScannerMod {
     public ScannerMod() {
         ScannerRegistry.register(FMLJavaModLoadingContext.get().getModEventBus());
         gg.lakehouse.scanner.network.ScannerNetwork.register();
+        net.minecraftforge.fml.ModLoadingContext.get().registerConfig(
+            net.minecraftforge.fml.config.ModConfig.Type.SERVER, ScannerConfig.SPEC);
         MinecraftForge.EVENT_BUS.addGenericListener(BlockEntity.class, ScannerMod::attachPeripherals);
     }
 
