@@ -1,0 +1,9 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [ "CCC", "CSC", "CCC" ],
+  "key": {
+    "C": { "item": "computercraft:cable" },
+    "S": { "item": "minecraft:slime_ball" }
+  },
+  "result": { "item": "lakescanner:camo_cable", "count": 8 }
+}

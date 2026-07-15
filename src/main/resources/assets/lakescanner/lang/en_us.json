@@ -17,5 +17,6 @@
   "item.lakescanner.stamp.blank": "This stamp has no emblem yet -- use it with empty hands to design one",
   "item.lakescanner.stamp.blank_hint": "Blank",
   "item.lakescanner.stamp.engraved": "Engraved",
-  "item.lakescanner.stamp.hint": "Click to stamp -- shift-click to stamp repeatedly"
+  "item.lakescanner.stamp.hint": "Click to stamp -- shift-click to stamp repeatedly",
+  "block.lakescanner.camo_cable": "Camo Network Cable"
 }

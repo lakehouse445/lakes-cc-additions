@@ -1,0 +1,49 @@
+{
+  "multipart": [
+    {
+      "apply": { "model": "computercraft:block/cable_core_facing", "x": 90 },
+      "when": { "OR": [
+        { "up": "true", "north": "false", "south": "false", "east": "false", "west": "false" },
+        { "down": "true", "north": "false", "south": "false", "east": "false", "west": "false" }
+      ]}
+    },
+    {
+      "apply": { "model": "computercraft:block/cable_core_facing", "y": 0 },
+      "when": { "OR": [
+        { "down": "false", "up": "false", "north": "false", "south": "false", "east": "false", "west": "false" },
+        { "down": "false", "up": "false", "north": "true", "east": "false", "west": "false" },
+        { "down": "false", "up": "false", "south": "true", "east": "false", "west": "false" }
+      ]}
+    },
+    {
+      "apply": { "model": "computercraft:block/cable_core_facing", "y": 90 },
+      "when": { "OR": [
+        { "down": "false", "up": "false", "north": "false", "south": "false", "east": "true" },
+        { "down": "false", "up": "false", "north": "false", "south": "false", "west": "true" }
+      ]}
+    },
+    {
+      "apply": { "model": "computercraft:block/cable_core_any" },
+      "when": { "OR": [
+        { "down": "true", "north": "true" },
+        { "down": "true", "south": "true" },
+        { "down": "true", "west": "true" },
+        { "down": "true", "east": "true" },
+        { "up": "true", "north": "true" },
+        { "up": "true", "south": "true" },
+        { "up": "true", "west": "true" },
+        { "up": "true", "east": "true" },
+        { "north": "true", "west": "true" },
+        { "north": "true", "east": "true" },
+        { "south": "true", "west": "true" },
+        { "south": "true", "east": "true" }
+      ]}
+    },
+    { "apply": { "model": "computercraft:block/cable_arm", "x": 270, "y": 0 }, "when": { "down": "true" } },
+    { "apply": { "model": "computercraft:block/cable_arm", "x": 90, "y": 0 }, "when": { "up": "true" } },
+    { "apply": { "model": "computercraft:block/cable_arm", "x": 0, "y": 180 }, "when": { "north": "true" } },
+    { "apply": { "model": "computercraft:block/cable_arm", "x": 0, "y": 0 }, "when": { "south": "true" } },
+    { "apply": { "model": "computercraft:block/cable_arm", "x": 0, "y": 90 }, "when": { "west": "true" } },
+    { "apply": { "model": "computercraft:block/cable_arm", "x": 0, "y": 270 }, "when": { "east": "true" } }
+  ]
+}

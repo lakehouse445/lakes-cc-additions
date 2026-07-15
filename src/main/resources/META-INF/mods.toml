@@ -5,7 +5,7 @@ issueTrackerURL = ""
 
 [[mods]]
 modId = "lakescanner"
-version = "1.4.3"
+version = "${mod_version}"
 displayName = "Lake's CC Additions"
 description = '''
 CC:Tweaked Hardware and Tools for Paperwork.

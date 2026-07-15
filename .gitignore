@@ -23,3 +23,7 @@ eclipse/
 # OS noise
 Thumbs.db
 .DS_Store
+
+# local batch scripts
+*.bat
+!gradlew.bat

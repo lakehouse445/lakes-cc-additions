@@ -98,7 +98,19 @@ public final class ScannerRegistry {
         RECIPE_SERIALIZERS.register("stamp_copy",
             () -> new SimpleCraftingRecipeSerializer<>(StampCopyRecipe::new));
 
-    public static final RegistryObject<Item> STAMP = ITEMS.register("stamp",
+    public static final RegistryObject<net.minecraft.world.level.block.Block> CAMO_CABLE =
+        BLOCKS.register("camo_cable", () -> new CamoCableBlock(
+            net.minecraft.world.level.block.state.BlockBehaviour.Properties.of()
+                .strength(1.0f).sound(net.minecraft.world.level.block.SoundType.WOOL)));
+
+    public static final RegistryObject<Item> CAMO_CABLE_ITEM = ITEMS.register("camo_cable",
+        () -> new BlockItem(CAMO_CABLE.get(), new Item.Properties()));
+
+    public static final RegistryObject<net.minecraft.world.level.block.entity.BlockEntityType<CamoCableBlockEntity>> CAMO_CABLE_BE =
+        BLOCK_ENTITIES.register("camo_cable",
+            () -> CamoCableBlock.createBlockEntityType(CAMO_CABLE.get()));
+
+        public static final RegistryObject<Item> STAMP = ITEMS.register("stamp",
         () -> new StampItem(new Item.Properties()));
 
     public static final RegistryObject<MenuType<ScannerMenu>> SCANNER_MENU =
@@ -115,6 +127,7 @@ public final class ScannerRegistry {
                 output.accept(FOLDER.get());
                 output.accept(PEN.get());
                 output.accept(STAMP.get());
+                output.accept(CAMO_CABLE_ITEM.get());
                 output.accept(createDeluxePocket());
             })
             .build());

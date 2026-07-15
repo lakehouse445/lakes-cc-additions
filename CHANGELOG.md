@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.6.1-alpha
+Added the Camo Network Cable: joins CC:T wired networks like a cable and can
+be disguised as any full opaque block (right-click with the block, sneak-punch
+to strip). Uses CC:T's cable model and textures with a matching hitbox, and
+the disguise renders as real terrain geometry so resource packs and shader
+material maps apply. Fixed the disguise not appearing until a neighbouring
+block update. Build now produces lakeccaddition-<version>.jar with the version
+sourced from gradle.properties alone.
+
 ## 1.3.1
 Stamp editor layout corrections: readable palette swatches, no overlapping
 controls.
