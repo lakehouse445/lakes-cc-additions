@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.6.2-alpha
+Printed books can now be placed in chiseled bookshelves. Fixed thick printed
+books z-fighting when held (page edges now keep stable depth separation, also
+under shaders). Fixed paging through a printout faster than the server round
+trip snapping back to stale pages; the viewer is now client-authoritative and
+draws pen ink directly.
+
 ## 1.6.1-alpha
 Added the Camo Network Cable: joins CC:T wired networks like a cable and can
 be disguised as any full opaque block (right-click with the block, sneak-punch

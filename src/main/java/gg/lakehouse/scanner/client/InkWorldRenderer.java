@@ -3,6 +3,7 @@ package gg.lakehouse.scanner.client;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.math.Axis;
 import dan200.computercraft.client.render.ItemMapLikeRenderer;
+import dan200.computercraft.client.render.PrintoutRenderer;
 import dan200.computercraft.client.render.text.FixedWidthFontRenderer;
 import gg.lakehouse.scanner.DrawingData;
 import gg.lakehouse.scanner.PenItem;
@@ -17,31 +18,71 @@ import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
-import java.lang.reflect.Method;
-
 import static dan200.computercraft.client.render.PrintoutRenderer.COVER_SIZE;
 import static dan200.computercraft.client.render.PrintoutRenderer.X_SIZE;
+import static dan200.computercraft.client.render.PrintoutRenderer.X_TEXT_MARGIN;
 import static dan200.computercraft.client.render.PrintoutRenderer.Y_SIZE;
+import static dan200.computercraft.client.render.PrintoutRenderer.Y_TEXT_MARGIN;
+import static dan200.computercraft.client.render.PrintoutRenderer.offsetAt;
 
 /**
- * Draws ink layers over printouts rendered in hand and in item frames.
- * CC:T cancels vanilla rendering and draws the page itself; we listen at
- * LOW priority with receiveCanceled and draw the ink with the same
- * transforms. Extends CC:T's ItemMapLikeRenderer so all first-person hand
- * mathematics (side/centre hold, swing, equip) are inherited, not copied.
+ * Printout rendering in hand and in item frames.
+ *
+ * Single pages: CC:T renders the page itself (cancelling the event); we
+ * listen at LOW priority with receiveCanceled and add the ink layer with
+ * the same transforms. Extends CC:T's ItemMapLikeRenderer so all
+ * first-person hand mathematics (side/centre hold, swing, equip) are
+ * inherited, not copied.
+ *
+ * Multi-page printouts and books: we take the event over entirely (HIGHEST
+ * priority, cancel before CC:T sees it) and draw border, text and ink
+ * ourselves with the z axis spread out -- see Z_SPREAD.
  */
 @Mod.EventBusSubscriber(modid = ScannerRegistry.MOD_ID, value = Dist.CLIENT)
 public final class InkWorldRenderer extends ItemMapLikeRenderer {
+    private static final int LINES = 21;
+
+    /**
+     * Multiplies CC:T's internal z-offsets when we draw a printout in hand.
+     * drawBorder spaces the page leaves 0.001 apart, which after the 0.42
+     * item scale is ~2e-6 blocks: below depth-buffer precision (worse under
+     * shaders, which compress hand depth), so thick books z-fight. 16x lifts
+     * the spacing above precision while staying visually imperceptible
+     * (under a millimetre across the whole stack).
+     */
+    private static final float Z_SPREAD = 16f;
+
     private static final InkWorldRenderer INSTANCE = new InkWorldRenderer();
-    private static Method offsetAt;
-    private static boolean offsetAtFailed = false;
+
+    /** True while the HIGHEST-priority pass draws the whole printout. */
+    private boolean fullDraw = false;
 
     private InkWorldRenderer() {}
 
+    /** Books/multi-page printouts: draw everything ourselves with spread z. */
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public static void onRenderHandEarly(RenderHandEvent event) {
+        if (event.isCanceled()) return;
+        ItemStack stack = event.getItemStack();
+        if (!PenItem.isPrintout(stack) || pageCount(stack) <= 1) return;
+        event.setCanceled(true);
+        INSTANCE.fullDraw = true;
+        try {
+            INSTANCE.renderItemFirstPerson(
+                event.getPoseStack(), event.getMultiBufferSource(), event.getPackedLight(),
+                event.getHand(), event.getInterpolatedPitch(), event.getEquipProgress(),
+                event.getSwingProgress(), stack);
+        } finally {
+            INSTANCE.fullDraw = false;
+        }
+    }
+
+    /** Single pages: CC:T drew the page (and cancelled); add ink on top. */
     @SubscribeEvent(priority = EventPriority.LOW, receiveCanceled = true)
     public static void onRenderHand(RenderHandEvent event) {
-        if (!event.isCanceled()) return; // CC:T didn't render a printout
+        if (!event.isCanceled()) return; // nobody rendered a printout
         ItemStack stack = event.getItemStack();
+        if (pageCount(stack) > 1) return; // the whole-book pass already drew ink
         if (!hasInk(stack)) return;
         INSTANCE.renderItemFirstPerson(
             event.getPoseStack(), event.getMultiBufferSource(), event.getPackedLight(),
@@ -75,25 +116,15 @@ public final class InkWorldRenderer extends ItemMapLikeRenderer {
         transform.mulPose(Axis.XP.rotationDegrees(180f));
         transform.scale(0.42f, 0.42f, -0.42f);
         transform.translate(-0.5f, -0.48f, 0.0f);
-        drawInkOnPage(transform, render, stack, light);
-    }
 
-    private static boolean hasInk(ItemStack stack) {
-        return PenItem.isPrintout(stack) && DrawingData.get(stack, 0) != null;
-    }
-
-    /** Mirror drawPrintout's normalisation, then emit the page-0 ink quads. */
-    private static void drawInkOnPage(PoseStack transform, MultiBufferSource render,
-                                      ItemStack stack, int light) {
-        CompoundTag tag = stack.getTag();
-        int pages = tag != null && tag.contains("Pages") ? Math.max(1, tag.getInt("Pages")) : 1;
+        // Mirror drawPrintout's normalisation
+        int pages = pageCount(stack);
         boolean book = stack.getDescriptionId().contains("printed_book");
-
-        double width = X_SIZE + (book ? 0 : pageOffset(pages - 1));
+        double width = X_SIZE + (book ? 0 : offsetAt(pages - 1));
         double height = Y_SIZE;
         double visualWidth = width, visualHeight = height;
         if (book) {
-            visualWidth += 2 * COVER_SIZE + 2 * pageOffset(pages);
+            visualWidth += 2 * COVER_SIZE + 2 * offsetAt(pages);
             visualHeight += 2 * COVER_SIZE;
         }
         double max = Math.max(visualHeight, visualWidth);
@@ -101,7 +132,43 @@ public final class InkWorldRenderer extends ItemMapLikeRenderer {
         transform.scale(scale, scale, scale);
         transform.translate((max - width) / 2.0, (max - height) / 2.0, 0.0);
 
+        if (fullDraw) {
+            transform.scale(1f, 1f, Z_SPREAD);
+            drawWholePrintout(transform, render, stack, pages, book, light);
+        } else {
+            emitInkQuads(transform, render, DrawingData.get(stack, 0), light);
+        }
+    }
+
+    /** Border, page-0 text and ink -- what CC:T's drawPrintout would draw. */
+    private static void drawWholePrintout(PoseStack transform, MultiBufferSource render,
+                                          ItemStack stack, int pages, boolean book, int light) {
+        CompoundTag tag = stack.getTag();
+        String[] text = new String[pages * LINES];
+        String[] colours = new String[pages * LINES];
+        for (int i = 0; i < text.length; i++) {
+            text[i] = pad(tag != null ? tag.getString("Text" + i) : "", ' ');
+            colours[i] = pad(tag != null ? tag.getString("Color" + i) : "", 'f');
+        }
+        PrintoutRenderer.drawBorder(transform, render, 0, 0, 0, 0, pages, book, light);
+        PrintoutRenderer.drawText(transform, render, X_TEXT_MARGIN, Y_TEXT_MARGIN, 0, light, text, colours);
         emitInkQuads(transform, render, DrawingData.get(stack, 0), light);
+    }
+
+    private static int pageCount(ItemStack stack) {
+        CompoundTag tag = stack.getTag();
+        return tag != null && tag.contains("Pages") ? Math.max(1, tag.getInt("Pages")) : 1;
+    }
+
+    private static boolean hasInk(ItemStack stack) {
+        return PenItem.isPrintout(stack) && DrawingData.get(stack, 0) != null;
+    }
+
+    private static String pad(String s, char fill) {
+        if (s.length() >= 25) return s.substring(0, 25);
+        StringBuilder sb = new StringBuilder(s);
+        while (sb.length() < 25) sb.append(fill);
+        return sb.toString();
     }
 
     private static void emitInkQuads(PoseStack transform, MultiBufferSource render,
@@ -123,22 +190,6 @@ public final class InkWorldRenderer extends ItemMapLikeRenderer {
                     runInk = v;
                 }
             }
-        }
-    }
-
-    /** PrintoutRenderer.offsetAt reflectively (package-private); 0 on failure. */
-    private static double pageOffset(int page) {
-        if (offsetAtFailed) return 0;
-        try {
-            if (offsetAt == null) {
-                offsetAt = dan200.computercraft.client.render.PrintoutRenderer.class
-                    .getDeclaredMethod("offsetAt", int.class);
-                offsetAt.setAccessible(true);
-            }
-            return ((Number) offsetAt.invoke(null, page)).doubleValue();
-        } catch (ReflectiveOperationException e) {
-            offsetAtFailed = true;
-            return 0;
         }
     }
 }
