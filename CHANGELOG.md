@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.7.0-alpha
+## 1.7.0
 New pen texture, held with a pencil-style grip in first and third person.
 First person now renders the player's arm gripping the pen -- correct skin
 and slim/wide arm variant, equip and swing animations preserved -- instead
