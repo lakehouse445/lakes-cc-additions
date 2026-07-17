@@ -1,2 +1,37 @@
-{ "parent": "minecraft:item/generated",
-  "textures": { "layer0": "lakescanner:item/pen" } }
+{
+    "credit": "sonion :wilted_rose:",
+    "parent": "minecraft:item/handheld",
+    "textures": {
+        "layer0": "lakescanner:item/pen"
+    },
+    "display": {
+        "thirdperson_righthand": {
+            "rotation": [-60, 90, 0],
+            "translation": [0, -0.75, -0.5],
+            "scale": [0.55, 0.55, 0.55]
+        },
+        "thirdperson_lefthand": {
+            "rotation": [-60, -90, 0],
+            "translation": [0, -0.75, -0.5],
+            "scale": [0.55, 0.55, 0.55]
+        },
+        "firstperson_righthand": {
+            "rotation": [-60, 90, 0],
+            "translation": [0.75, 4, 0],
+            "scale": [0.45, 0.45, 0.45]
+        },
+        "firstperson_lefthand": {
+            "rotation": [-60, -90, 0],
+            "translation": [0.75, 4, 0],
+            "scale": [0.45, 0.45, 0.45]
+        },
+        "ground": {
+            "translation": [0, 0, 1.25],
+            "scale": [0.55, 0.55, 0.55]
+        },
+        "head": {
+            "rotation": [-4.22, 88.06, 51],
+            "translation": [-7, 0.5, 1.75]
+        }
+    }
+}

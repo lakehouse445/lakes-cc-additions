@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.7.0-alpha
+New pen texture, held with a pencil-style grip in first and third person.
+First person now renders the player's arm gripping the pen -- correct skin
+and slim/wide arm variant, equip and swing animations preserved -- instead
+of a floating sprite. Fixed the printout viewer drawing its background
+gradient over the page, which made the paper see-through and ghosted the
+held printout through the GUI.
+
 ## 1.6.2-alpha
 Printed books can now be placed in chiseled bookshelves. Fixed thick printed
 books z-fighting when held (page edges now keep stable depth separation, also

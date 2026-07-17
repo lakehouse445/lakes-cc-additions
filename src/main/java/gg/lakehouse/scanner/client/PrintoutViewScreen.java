@@ -152,7 +152,14 @@ public final class PrintoutViewScreen extends AbstractContainerScreen<PrintoutMe
 
     @Override
     public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
+        // The page is drawn at z <= 0 (drawBorder puts the paper at -0.0005 and
+        // the leaf edges below that), so the background gradient must sit behind
+        // it or its depth pass swallows the whole page, leaving a see-through
+        // sheet with the world-space held printout ghosting through.
+        g.pose().pushPose();
+        g.pose().translate(0, 0, -1);
         renderBackground(g);
+        g.pose().popPose();
         super.render(g, mouseX, mouseY, partialTick);
     }
 
